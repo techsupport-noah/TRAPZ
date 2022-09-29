@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="TRAPZ_Semaphore">
+      <UniqueIdentifier>{dd497956-8dbf-446c-bd95-a2abc59b922b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="TRAPZ_Timestamp">
+      <UniqueIdentifier>{086b15c0-dd7d-4b81-9023-16c24a71f214}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="TRAPZ_ActiveState">
+      <UniqueIdentifier>{2d35d647-6b86-4c93-ae12-1d00fbb21509}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="TRAPZ_TCPConnection">
+      <UniqueIdentifier>{a6c4d643-644b-4145-a0ff-f922bf1237bd}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="TRAPZ_Timestamp\TRAPZ_Timestamp.cpp">
+      <Filter>TRAPZ_Timestamp</Filter>
+    </ClCompile>
+    <ClCompile Include="TRAPZ_ActiveState\TRAPZ_ActiveState.cpp">
+      <Filter>TRAPZ_ActiveState</Filter>
+    </ClCompile>
+    <ClCompile Include="TRAPZ_Semaphore\TRAPZ_Semaphore.cpp">
+      <Filter>TRAPZ_Semaphore</Filter>
+    </ClCompile>
+    <ClCompile Include="TRAPZ_QueueEntry.cpp" />
+    <ClCompile Include="TRAPZ_TCPConnection\TRAPZ_TCPConnection.cpp">
+      <Filter>TRAPZ_TCPConnection</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="TRAPZ_Timestamp\TRAPZ_Timestamp.h">
+      <Filter>TRAPZ_Timestamp</Filter>
+    </ClInclude>
+    <ClInclude Include="TRAPZ_ActiveState\TRAPZ_ActiveState.h">
+      <Filter>TRAPZ_ActiveState</Filter>
+    </ClInclude>
+    <ClInclude Include="TRAPZ_Semaphore\TRAPZ_Semaphore.h">
+      <Filter>TRAPZ_Semaphore</Filter>
+    </ClInclude>
+    <ClInclude Include="TRAPZ_QueueEntry.h" />
+    <ClInclude Include="TRAPZ_TCPConnection\TRAPZ_TCPConnection.h">
+      <Filter>TRAPZ_TCPConnection</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

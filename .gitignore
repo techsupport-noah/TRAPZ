@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+#Logs
+*.tlog
+
+#VS
+*.vs
+*.log
+*x64
