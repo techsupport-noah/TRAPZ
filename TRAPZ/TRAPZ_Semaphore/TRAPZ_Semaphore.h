@@ -3,44 +3,54 @@
 
 #ifdef _MSC_VER
 
-#pragma comment(lib, "ws2_32.lib") 
-
 #include <stdio.h>
 #include <Windows.h>
+
+#else
+#error Onyl MS supported for this class currently.
+#endif
 
 //! \brief Wrapper class for semaphores.
 //!
 //! The class currently only supports windows.
-//! It uses windows api handles and waitforsingleobject() function.
+//! It uses windows api handles and waitforsingleobject() function to block the thread while waiting.
 //!
 //! \author Noah Wiederhold
-//! \version 03.2022
+//! \version 07.2022
 class TRAPZ_Semaphore
 {
 public:
 	//! Default constructor.
 	//! Creates semaphore handle.
-	//! \param int initial value of the semaphore (=already used ressources)
-	//! \param int max value of the semaphore (=max number of ressources)
-	//! \param char* name of semaphore
-	TRAPZ_Semaphore(int initial, int max,const char* name);
+	//!
+	//! \param	 initial		 The value of the semaphore. (=already used ressources)
+	//! \param	 max			 The value of the semaphore. (=max number of ressources)
+	//! \param	 name			 The name of semaphore.	(max of 20 characters)
+	TRAPZ_Semaphore(int initial, int max, const char* name = "unnamed semaphore");
 
+	//! Default destructor.
 	//! Closes semaphore handle.
-	~TRAPZ_Semaphore();
+	~TRAPZ_Semaphore(void);
 
 	//! Method enters semaphore and allocates one ressource.
-	//! Method blocks calling thread if no ressources available.
-	void enter();
+	//! Blocks calling thread if no ressources available.
+	void enter(void);
+
 	//! Method leaves semaphore and returns one ressource.
-	void leave();
+	void leave(void);
 
 private:
-	HANDLE ghSemaphore;									/**< this handle is used to store the semaphore */
-};
 
-#else
-#error Onyl MS supported for this class currently.
+	//--------------------------------------------------------------------------------------------------------------
+	// Private data.
+	//--------------------------------------------------------------------------------------------------------------
+	HANDLE ghSemaphore;									/**< this handle is used to store the semaphore */
+
+#ifdef _DEBUG
+	bool locked = false;	//field to check semaphore state, only for debugging
 #endif
+
+};
 
 
 #endif

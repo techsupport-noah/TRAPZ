@@ -2,30 +2,28 @@
 
 //server mode
 //blocks until connected
-TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
-										 int							host_port,
-										 bool							use_async = true)
+TRAPZ_TCPConnection::TRAPZ_TCPConnection(string	host_addr,int host_port, bool use_async)
 {
 	m_mode = Mode::SERVER;
 	m_hostAddr = host_addr;
 	m_hostPort = host_port;
 	m_asyncFlag = use_async;
 
-	m_asyncFlagSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of async flag.");
 	m_receivingQueueSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the receiving queue.");
 	m_sendingQueueSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the sending queue");
 	m_threadsRunningFlagSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the threads running flag.");
 	m_threadsActiveFlagSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the threads active flag.");
 	m_sendingQueueEntrySemaphore = new TRAPZ_Semaphore(0, TRAPZ_TCPConnection_MAX_SENDQUEUE + 1, "Semaphore of the threads running flag.");
 
-	m_callbackMessageReceived = [](string a){};
+	m_callbackMessageReceived = [](string a){}; //TODO test = 0
+	m_callbackMessageSent = [](string a){};
 	m_callbackConnectionClosed = [](){};
 	m_callbackConnectionEstablished = [](){};
 
 	initServerMode(host_addr, host_port);
 
-	m_sendingThread = std::thread(&sendingThreadFunction, this);
-	m_receivingThread = std::thread(&receivingThreadFunction, this);
+	m_sendingThread = std::thread(&TRAPZ_TCPConnection::sendingThreadFunction, this);
+	m_receivingThread = std::thread(&TRAPZ_TCPConnection::receivingThreadFunction, this);
 
 	changeAsyncFlag(use_async);
 
@@ -39,11 +37,7 @@ TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
 
 //client mode
 //blocks until connected
-TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
-										 int							host_port,
-										 string							remote_addr,
-										 int							remote_port,
-										 bool							use_async = true)
+TRAPZ_TCPConnection::TRAPZ_TCPConnection(string	host_addr, int host_port, string	remote_addr, int remote_port, bool use_async)
 {
 	m_mode = Mode::CLIENT;
 	m_hostAddr = host_addr;
@@ -52,7 +46,6 @@ TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
 	m_remotePort = remote_port;
 	m_asyncFlag = use_async;
 
-	m_asyncFlagSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of async flag.");
 	m_receivingQueueSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the receiving queue.");
 	m_sendingQueueSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the sending queue");
 	m_threadsRunningFlagSemaphore = new TRAPZ_Semaphore(1, 1, "Semaphore of the threads running flag.");
@@ -65,8 +58,8 @@ TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
 
 	initClientMode(host_addr, host_port, remote_addr, remote_port);
 
-	m_sendingThread = std::thread(&sendingThreadFunction, this);
-	m_receivingThread = std::thread(&receivingThreadFunction, this);
+	m_sendingThread = std::thread(&TRAPZ_TCPConnection::sendingThreadFunction, this);
+	m_receivingThread = std::thread(&TRAPZ_TCPConnection::receivingThreadFunction, this);
 
 	changeAsyncFlag(use_async);
 
@@ -81,12 +74,19 @@ TRAPZ_TCPConnection::TRAPZ_TCPConnection(string							host_addr,
 TRAPZ_TCPConnection::~TRAPZ_TCPConnection()
 {
 	cleanup();
+	if (m_callbackConnectionClosedDoneOneFlag){
+		if (m_callbackConnectionClosedRecallFlag){
+			m_callbackConnectionClosed();
+		}
+	}
+	else{
+		m_callbackConnectionClosed();
+		m_callbackConnectionClosedDoneOneFlag = true;
+	}
 }
 
 void TRAPZ_TCPConnection::changeAsyncFlag(bool flag)
 {
-	m_asyncFlagSemaphore->enter();
-
 	m_asyncFlag = flag;
 
 	if (m_asyncFlag){
@@ -95,13 +95,16 @@ void TRAPZ_TCPConnection::changeAsyncFlag(bool flag)
 	else{
 		stopThreads();
 	}
-
-	m_asyncFlagSemaphore->leave();
 }
 
-void TRAPZ_TCPConnection::setCallback_MessageReceived(std::function<void(string)> callback_function)
+void TRAPZ_TCPConnection::setCallback_MessageReceived(std::function<void(const string&)> callback_function)
 {
 	m_callbackMessageReceived = callback_function;
+}
+
+void TRAPZ_TCPConnection::setCallback_MessageSent(std::function<void(const string&)> callback_function)
+{
+	m_callbackMessageSent = callback_function;
 }
 
 void TRAPZ_TCPConnection::setCallback_ConnectionClosed(std::function<void(void)> callback_function, bool recall)
@@ -118,42 +121,36 @@ void TRAPZ_TCPConnection::setCallback_ConnectionEstablished(std::function<void(v
 
 void TRAPZ_TCPConnection::sendData(string data)
 {
-	m_asyncFlagSemaphore->enter();
+	//m_asyncFlagSemaphore->enter(); //not needed because main process cant call changeAsyncFlag() while executing this method
 	switch (m_asyncFlag)
 	{
 	case true://async receiving
+		//up sending semaphore by one for each element in the queue, blocks if queue is full (TRAPZ_TCPConnection_MAX_SENDQUEUE)
+		m_sendingQueueEntrySemaphore->enter();
+		 
 		//enter queue critical section
 		m_sendingQueueSemaphore->enter();
 
-			//wait until there is space in queue
-			while (m_sendingQueue.size() == TRAPZ_TCPConnection_MAX_SENDQUEUE)
-			{
-				m_sendingQueueSemaphore->leave();
-				std::this_thread::sleep_for(std::chrono::microseconds(10));
-				m_sendingQueueSemaphore->enter();
-			}
-
 			//add to sending queue
-			//TODO
+			m_sendingQueue.push_back(data);
 
 		//leave queue critical section
 		m_sendingQueueSemaphore->leave();
 
-		//up sending semaphore by one for each element in the queue
-		m_sendingQueueEntrySemaphore->leave();
 		break;
 	case false://blocking receiving
 		//send data over tcp socket
+		sendString(data);
 		break;
 	}
-	m_asyncFlagSemaphore->leave();
+	//m_asyncFlagSemaphore->leave();
 }
 
 string TRAPZ_TCPConnection::receiveData()
 {
 	string data = "";
 
-	m_asyncFlagSemaphore->enter();
+	//m_asyncFlagSemaphore->enter();
 	switch (m_asyncFlag)
 	{
 	case true://async receiving
@@ -184,11 +181,12 @@ string TRAPZ_TCPConnection::receiveData()
 		}
 		m_receivingQueueSemaphore->leave();
 
-		//receive every message from the socket and add to data
+		data += receiveStream();
 
 		break;
 	}
-	m_asyncFlagSemaphore->leave();
+
+	//m_asyncFlagSemaphore->leave();
 
 	return data;
 }
@@ -196,11 +194,6 @@ string TRAPZ_TCPConnection::receiveData()
 TRAPZ_TCPConnection::Additional_Data* TRAPZ_TCPConnection::getData()
 {
 	return &m_additionalData;
-}
-
-void TRAPZ_TCPConnection::sendMessage(string message)
-{
-
 }
 
 void TRAPZ_TCPConnection::initClientMode(string host_addr, int host_port, string remote_addr, int remote_port)
@@ -224,8 +217,16 @@ void TRAPZ_TCPConnection::initClientMode(string host_addr, int host_port, string
 	//bind socket to specified addr and port
 	struct sockaddr_in mSockAddress;
 	mSockAddress.sin_family = AF_INET;
-
-	mSockAddress.sin_addr.s_addr = inet_addr(host_addr.c_str());
+	int result = inet_pton(AF_INET, host_addr.c_str(), &mSockAddress.sin_addr.s_addr);
+	if (result == 0)
+	{
+		cleanup();
+		throwMessage("inet_pton was not given a right address");
+	} else if (result == -1)
+	{
+		cleanup();
+		throwMessage(WSAGetLastErrorString());
+	}
 	mSockAddress.sin_port = htons(host_port);
 	if (bind(m_socket, (struct sockaddr*)&mSockAddress, sizeof(mSockAddress)) == SOCKET_ERROR)
 	{
@@ -236,7 +237,16 @@ void TRAPZ_TCPConnection::initClientMode(string host_addr, int host_port, string
 	//connect socket
 	setSocketBlocking();
 
-	mSockAddress.sin_addr.s_addr = inet_addr(remote_addr.c_str());
+	result = inet_pton(AF_INET, host_addr.c_str(), &mSockAddress.sin_addr.s_addr);
+	if (result == 0)
+	{
+		cleanup();
+		throwMessage("inet_pton was not given a right address");
+	} else if (result == -1)
+	{
+		cleanup();
+		throwMessage(WSAGetLastErrorString());
+	}
 	mSockAddress.sin_port = htons(remote_port);
 
 	//loop until connected (blocks thread)
@@ -247,12 +257,26 @@ void TRAPZ_TCPConnection::initClientMode(string host_addr, int host_port, string
 		{
 			if (WSAGetLastError() != WSAETIMEDOUT)
 			{
-				throw std::runtime_error("Error while connecting.");
+				cleanup();
+				throwMessage(WSAGetLastErrorString());
 			}
+#if TRAPZ_COLLECTADDITIONALDATA
+			m_additionalData.Count_ConnectionAttempts++;
+#endif
 		} else
 		{
 			connected = true;
-			m_callbackConnectionEstablished();
+
+			if (m_callbackConnectionEstablishedDoneOneFlag){
+				if (m_callbackConnectionEstablishedRecallFlag){
+					m_callbackConnectionEstablished();
+				}
+			}
+			else{
+				m_callbackConnectionEstablished();
+				m_callbackConnectionEstablishedDoneOneFlag = true;
+			}
+			
 		}
 	}
 }
@@ -278,7 +302,16 @@ void TRAPZ_TCPConnection::initServerMode(string host_addr, int host_port)
 	struct sockaddr_in mSockAddress;
 	mSockAddress.sin_family = AF_INET;
 
-	mSockAddress.sin_addr.s_addr = inet_addr(host_addr.c_str());
+	int result = inet_pton(AF_INET, host_addr.c_str(), &mSockAddress.sin_addr.s_addr);
+	if (result == 0)
+	{
+		cleanup();
+		throwMessage("inet_pton was not given a right address");
+	} else if (result == -1)
+	{
+		cleanup();
+		throwMessage(WSAGetLastErrorString());
+	}
 	mSockAddress.sin_port = htons(host_port);
 	if (bind(m_listeningSocket, (struct sockaddr*)&mSockAddress, sizeof(mSockAddress)) == SOCKET_ERROR)
 	{
@@ -309,6 +342,16 @@ void TRAPZ_TCPConnection::initServerMode(string host_addr, int host_port)
 		setSocketOption(SOL_SOCKET, SO_RCVBUF, TRAPZ_TCPConnection_RCVBUF_SIZE, m_socket); //set receiving buffer size 
 		setSocketOption(SOL_SOCKET, SO_SNDBUF, TRAPZ_TCPConnection_SNDBUF_SIZE, m_socket); //set receiving buffer size 
 	}
+
+	if (m_callbackConnectionEstablishedDoneOneFlag){
+		if (m_callbackConnectionEstablishedRecallFlag){
+			m_callbackConnectionEstablished();
+		}
+	}
+	else{
+		m_callbackConnectionEstablished();
+		m_callbackConnectionEstablishedDoneOneFlag = true;
+	}
 }
 
 int TRAPZ_TCPConnection::sendingThreadFunction()
@@ -334,21 +377,18 @@ int TRAPZ_TCPConnection::sendingThreadFunction()
 			//down semaphore for each sent element
 			m_sendingQueueEntrySemaphore->enter();
 
+			string message;
 			//enter queue critical section
 			m_sendingQueueSemaphore->enter();
-			string message = m_sendingQueue.front();
-			//leave queue critical section
-			m_sendingQueueSemaphore->enter();
-
-			//send message
-			sendMessage(m_sendingQueue.front());
-
-			//enter queue critical section
-			m_sendingQueueSemaphore->enter();
+			message = m_sendingQueue.front();
 			m_sendingQueue.pop_front();
 			//leave queue critical section
-			m_sendingQueueSemaphore->enter();
-		
+			m_sendingQueueSemaphore->leave();
+
+			//send message
+			sendString(message);
+			m_callbackMessageSent(message);
+				
 			//update active flag
 			m_threadsActiveFlagSemaphore->enter();
 			active = m_threadsActiveFlag;
@@ -381,9 +421,17 @@ int TRAPZ_TCPConnection::receivingThreadFunction()
 
 		while (active)
 		{
+			string data;
 			//receive
+			data += receiveStream();
 
 			//put in queue
+			m_receivingQueueSemaphore->enter();
+			m_receivingQueue.push_back(data);
+			m_receivingQueueSemaphore->leave();
+
+			//call callback
+			m_callbackMessageReceived(data);
 
 			m_threadsActiveFlagSemaphore->enter();
 			active = m_threadsActiveFlag;
@@ -437,6 +485,156 @@ void TRAPZ_TCPConnection::cleanup()
 	WSACleanup();
 
 	//stop and join threads
+}
+
+void TRAPZ_TCPConnection::sendString(string message)
+{
+	setSocketBlocking();
+
+	int bytes_sent = 0;
+	int bytes_tosent = message.size();
+	while (bytes_sent < bytes_tosent)
+	{
+		string remaining_message = message.substr(bytes_sent, bytes_tosent);
+		int result = send(m_socket, remaining_message.c_str(), remaining_message.size() - bytes_sent, 0);
+
+		//check for error
+		if (result == SOCKET_ERROR) {
+			//check for connection related errors and real errors
+			switch (result)
+			{
+			case WSAENETDOWN:
+			case WSAEACCES:
+			case WSAEINTR:
+			case WSAEINPROGRESS:
+			case WSAEFAULT:
+			case WSAENOTSOCK:
+			case WSAEOPNOTSUPP:
+			case WSAEMSGSIZE:
+			case WSAEINVAL:
+				cleanup();
+				throwMessage(WSAGetLastErrorString());
+				break;
+			case WSAENOBUFS:
+				//retry
+				bytes_sent -= result; //cancel out adding of sent bytes
+				break;
+			case WSANOTINITIALISED:
+			case WSAENETRESET:
+			case WSAENOTCONN:
+			case WSAESHUTDOWN:
+			case WSAEHOSTUNREACH:
+			case WSAECONNABORTED:
+			case WSAECONNRESET:
+			case WSAETIMEDOUT:
+				if (m_callbackConnectionClosedDoneOneFlag){
+					if (m_callbackConnectionClosedRecallFlag){
+						m_callbackConnectionClosed();
+					}
+				}
+				else{
+					m_callbackConnectionClosed();
+					m_callbackConnectionClosedDoneOneFlag = true;
+				}
+				switch (m_mode)
+				{
+				case Mode::SERVER:
+					initServerMode(m_hostAddr, m_hostPort);
+					break;
+				case Mode::CLIENT:
+					initClientMode(m_hostAddr, m_hostPort, m_remoteAddr, m_remotePort);
+					break;
+				}
+				break;
+			case WSAEWOULDBLOCK:
+				//wont happen as socket is blocking (just for complete handling)
+				break;
+			}
+		}
+		bytes_sent += result;	//add sent bytes from last send to all sent bytes
+	}
+	//sent all the data
+	
+}
+
+string TRAPZ_TCPConnection::receiveStream()
+{
+	string data;
+
+	setSocketNonBlocking();
+
+	//receive every message from the socket and add to data
+	int result;
+	char buf[TRAPZ_TCPConnection_RCVBUF_SIZE];
+	memset(buf, '\0', TRAPZ_TCPConnection_RCVBUF_SIZE);
+	while (result = recv(m_socket, buf, TRAPZ_TCPConnection_RCVBUF_SIZE, 0) > 0) //loop until no data received
+	{
+		//write local buffer to recv buffer
+		data += string(buf);
+	}
+
+	if (result == SOCKET_ERROR)
+	{
+		int error = WSAGetLastError();
+		//if error isnt about blocking
+	
+		switch (error)
+		{
+		case WSANOTINITIALISED:
+		case WSAENETDOWN:
+		case WSAEFAULT:
+		case WSAEINTR:
+		case WSAEINPROGRESS:
+		case WSAENOTSOCK:
+		case WSAEOPNOTSUPP:
+		case WSAEMSGSIZE:
+		case WSAEINVAL:
+			cleanup();
+			throwMessage(WSAGetLastErrorString());
+			break;
+		case WSAENOTCONN:
+		case WSAENETRESET:
+		case WSAESHUTDOWN:
+		case WSAECONNABORTED:
+		case WSAETIMEDOUT:
+		case WSAECONNRESET:
+			if (m_callbackConnectionClosedDoneOneFlag){
+				if (m_callbackConnectionClosedRecallFlag){
+					m_callbackConnectionClosed();
+				}
+			}
+			else{
+				m_callbackConnectionClosed();
+				m_callbackConnectionClosedDoneOneFlag = true;
+			}
+			switch (m_mode)
+			{
+			case Mode::SERVER:
+				initServerMode(m_hostAddr, m_hostPort);
+				break;
+			case Mode::CLIENT:
+				initClientMode(m_hostAddr, m_hostPort, m_remoteAddr, m_remotePort);
+				break;
+			}
+			break;
+		case WSAEWOULDBLOCK: //do nothing (return)
+			break;
+		}
+	}
+	else //connection closed --> reconnect
+		if (result == 0)
+		{
+			switch (m_mode)
+			{
+			case TRAPZ_TCPConnection::SERVER:
+				initServerMode(m_hostAddr, m_hostPort);
+				break;
+			case TRAPZ_TCPConnection::CLIENT:
+				initClientMode(m_hostAddr, m_hostPort, m_remoteAddr, m_remotePort);
+				break;
+			}
+		}
+	return data;
 }
 
 void TRAPZ_TCPConnection::setSocketBlocking()
